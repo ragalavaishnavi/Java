@@ -1,0 +1,512 @@
+package database;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+
+public class DBConnection {
+    // Updated database URL
+    private static final String URL = "jdbc:mysql://localhost:3306/nutrition_db";
+    private static final String USER = "root";
+    private static final String PASSWORD = "12345"; // change if needed
+
+    public static Connection getConnection() {
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            return DriverManager.getConnection(URL, USER, PASSWORD);
+        } catch (ClassNotFoundException | SQLException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+}
+2. patient.java
+package model;
+
+import java.io.Serializable;
+
+public class Patient implements Serializable {
+    private int id;
+    private String name;
+    private String medicalCondition;
+
+    // Constructor for adding a new patient (ID is auto-generated)
+    public Patient(String name, String medicalCondition) {
+        this.name = name;
+        this.medicalCondition = medicalCondition;
+    }
+
+    // Constructor for fetching from DB
+    public Patient(int id, String name, String medicalCondition) {
+        this.id = id;
+        this.name = name;
+        this.medicalCondition = medicalCondition;
+    }
+
+    // Getters
+    public int getId() { return id; }
+    public String getName() { return name; }
+    public String getMedicalCondition() { return medicalCondition; }
+
+    @Override
+    public String toString() {
+        // This is what will be displayed in the JList
+        return name + " (" + medicalCondition + ")";
+    }
+}
+3. Dietplan.java
+package model;
+
+import java.io.Serializable;
+
+public class DietPlan implements Serializable {
+    private int id;
+    private int patientId;
+    private String mealType; // e.g., "Breakfast", "Lunch"
+    private String foodItems;
+    private int calories;
+
+    // Constructor for adding a new diet item
+    public DietPlan(int patientId, String mealType, String foodItems, int calories) {
+        this.patientId = patientId;
+        this.mealType = mealType;
+        this.foodItems = foodItems;
+        this.calories = calories;
+    }
+
+    // Constructor for fetching from DB
+    public DietPlan(int id, int patientId, String mealType, String foodItems, int calories) {
+        this.id = id;
+        this.patientId = patientId;
+        this.mealType = mealType;
+        this.foodItems = foodItems;
+        this.calories = calories;
+    }
+
+    // Getters
+    public int getId() { return id; }
+    public int getPatientId() { return patientId; }
+    public String getMealType() { return mealType; }
+    public String getFoodItems() { return foodItems; }
+    public int getCalories() { return calories; }
+
+    @Override
+    public String toString() {
+        // This is what will be displayed in the JList
+        return mealType + ": " + foodItems + " (" + calories + " kcal)";
+    }
+}
+4. Dietclient.java
+ package client;
+
+import model.Patient;
+import model.DietPlan;
+import java.io.*;
+import java.net.*;
+import java.util.List;
+
+public class DietClient {
+    private String host;
+    private int port;
+
+    public DietClient(String host, int port) {
+        this.host = host;
+        this.port = port;
+    }
+
+    // Helper method to create a new connection for each request
+    private Socket connect() throws IOException {
+        return new Socket(host, port);
+    }
+
+    public List<Patient> getAllPatients() {
+        try (Socket socket = connect();
+             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+            
+            out.writeObject("GET_ALL_PATIENTS");
+            return (List<Patient>) in.readObject();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public List<DietPlan> getDietPlan(int patientId) {
+        try (Socket socket = connect();
+             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+            
+            out.writeObject("GET_DIET_PLAN");
+            out.writeObject(patientId);
+            return (List<DietPlan>) in.readObject();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    public String addPatient(Patient patient) {
+        try (Socket socket = connect();
+             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+            
+            out.writeObject("ADD_PATIENT");
+            out.writeObject(patient);
+            return (String) in.readObject();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Error: Could not connect to server.";
+        }
+    }
+
+    public String addDietItem(DietPlan dietPlan) {
+        try (Socket socket = connect();
+             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+             ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
+            
+            out.writeObject("ADD_DIET_ITEM");
+            out.writeObject(dietPlan);
+            return (String) in.readObject();
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "Error: Could not connect to server.";
+        }
+    }
+}
+5.serverui.java
+package server;
+
+import model.Patient;
+import model.DietPlan;
+import database.DBConnection;
+import java.io.*;
+import java.net.*;
+import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
+
+public class DietServer {
+    public static void main(String[] args) {
+        int port = 5000;
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
+            System.out.println("Diet Server started on port " + port);
+            while (true) {
+                Socket socket = serverSocket.accept();
+                System.out.println("Client connected: " + socket.getInetAddress());
+                new ClientHandler(socket).start();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+class ClientHandler extends Thread {
+    private Socket socket;
+
+    public ClientHandler(Socket socket) {
+        this.socket = socket;
+    }
+
+    public void run() {
+        try (
+            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())
+        ) {
+            String command = (String) in.readObject();
+
+            switch (command) {
+                case "GET_ALL_PATIENTS":
+                    out.writeObject(getAllPatients());
+                    break;
+                case "GET_DIET_PLAN":
+                    int patientId = (Integer) in.readObject();
+                    out.writeObject(getDietPlan(patientId));
+                    break;
+                case "ADD_PATIENT":
+                    Patient patient = (Patient) in.readObject();
+                    out.writeObject(addPatient(patient));
+                    break;
+                case "ADD_DIET_ITEM":
+                    DietPlan dietPlan = (DietPlan) in.readObject();
+                    out.writeObject(addDietItem(dietPlan));
+                    break;
+            }
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private List<Patient> getAllPatients() {
+        List<Patient> list = new ArrayList<>();
+        String sql = "SELECT * FROM patients";
+        try (Connection conn = DBConnection.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                list.add(new Patient(
+                    rs.getInt("id"),
+                    rs.getString("name"),
+                    rs.getString("medical_condition")
+                ));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return list;
+    }
+
+    private List<DietPlan> getDietPlan(int patientId) {
+        List<DietPlan> list = new ArrayList<>();
+        String sql = "SELECT * FROM diet_plans WHERE patient_id = ?";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setInt(1, patientId);
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                list.add(new DietPlan(
+                    rs.getInt("id"),
+                    rs.getInt("patient_id"),
+                    rs.getString("meal_type"),
+                    rs.getString("food_items"),
+                    rs.getInt("calories")
+                ));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return list;
+    }
+
+    private String addPatient(Patient p) {
+        String sql = "INSERT INTO patients(name, medical_condition) VALUES(?, ?)";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, p.getName());
+            ps.setString(2, p.getMedicalCondition());
+            ps.executeUpdate();
+            return "Patient added successfully!";
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return "Error adding patient.";
+        }
+    }
+
+    private String addDietItem(DietPlan dp) {
+        String sql = "INSERT INTO diet_plans(patient_id, meal_type, food_items, calories) VALUES(?, ?, ?, ?)";
+        try (Connection conn = DBConnection.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setInt(1, dp.getPatientId());
+            ps.setString(2, dp.getMealType());
+            ps.setString(3, dp.getFoodItems());
+            ps.setInt(4, dp.getCalories());
+            ps.executeUpdate();
+            return "Diet item added successfully!";
+        } catch (SQLException e) {
+            e.printStackTrace();
+            return "Error adding diet item.";
+        }
+    }
+}
+6.Dietplannerui.java
+package ui;
+
+import client.DietClient;
+import model.Patient;
+import model.DietPlan;
+
+import javax.swing.*;
+import javax.swing.event.ListSelectionEvent;
+import javax.swing.event.ListSelectionListener;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.util.List;
+
+public class DietPlannerUI extends JFrame {
+    private DietClient client;
+
+    private DefaultListModel<Patient> patientListModel;
+    private JList<Patient> patientList;
+    
+    private DefaultListModel<DietPlan> dietPlanListModel;
+    private JList<DietPlan> dietPlanList;
+
+    private JTextField patientNameField, conditionField, foodItemsField, caloriesField;
+    private JComboBox<String> mealTypeCombo;
+    private JButton addPatientButton, addDietItemButton;
+
+    public DietPlannerUI() {
+        client = new DietClient("localhost", 5000);
+        setupUI();
+        loadPatients();
+    }
+
+    private void setupUI() {
+        setTitle("Patient Diet and Nutrition Planner");
+        setSize(800, 600);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLayout(new BorderLayout(10, 10));
+
+        // --- Patient Panel (Top) ---
+        JPanel patientPanel = new JPanel(new GridLayout(2, 3, 5, 5));
+        patientPanel.setBorder(BorderFactory.createTitledBorder("Add New Patient"));
+        
+        patientPanel.add(new JLabel("Patient Name:"));
+        patientNameField = new JTextField();
+        patientPanel.add(patientNameField);
+        
+        addPatientButton = new JButton("Add Patient");
+        addPatientButton.addActionListener(this::addPatient);
+        patientPanel.add(addPatientButton);
+        
+        patientPanel.add(new JLabel("Medical Condition:"));
+        conditionField = new JTextField();
+        patientPanel.add(conditionField);
+        
+        add(patientPanel, BorderLayout.NORTH);
+
+        // --- Lists Panel (Center) ---
+        patientListModel = new DefaultListModel<>();
+        patientList = new JList<>(patientListModel);
+        patientList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        patientList.addListSelectionListener(this::onPatientSelected);
+        JScrollPane patientScrollPane = new JScrollPane(patientList);
+        patientScrollPane.setBorder(BorderFactory.createTitledBorder("Patients"));
+
+        dietPlanListModel = new DefaultListModel<>();
+        dietPlanList = new JList<>(dietPlanListModel);
+        JScrollPane dietScrollPane = new JScrollPane(dietPlanList);
+        dietScrollPane.setBorder(BorderFactory.createTitledBorder("Diet Plan"));
+        
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, patientScrollPane, dietScrollPane);
+        splitPane.setResizeWeight(0.4);
+        add(splitPane, BorderLayout.CENTER);
+
+        // --- Diet Item Panel (Bottom) ---
+        JPanel dietItemPanel = new JPanel(new GridLayout(3, 2, 5, 5));
+        dietItemPanel.setBorder(BorderFactory.createTitledBorder("Add Diet Item for Selected Patient"));
+        
+        dietItemPanel.add(new JLabel("Meal Type:"));
+        String[] mealTypes = {"Breakfast", "Lunch", "Dinner", "Snack"};
+        mealTypeCombo = new JComboBox<>(mealTypes);
+        dietItemPanel.add(mealTypeCombo);
+        
+        dietItemPanel.add(new JLabel("Food Items:"));
+        foodItemsField = new JTextField();
+        dietItemPanel.add(foodItemsField);
+        
+        dietItemPanel.add(new JLabel("Calories:"));
+        caloriesField = new JTextField();
+        dietItemPanel.add(caloriesField);
+        
+        addDietItemButton = new JButton("Add Item");
+        addDietItemButton.addActionListener(this::addDietItem);
+        dietItemPanel.add(addDietItemButton);
+        
+        add(dietItemPanel, BorderLayout.SOUTH);
+    }
+
+    private void loadPatients() {
+        patientListModel.clear();
+        List<Patient> patients = client.getAllPatients();
+        if (patients != null) {
+            for (Patient p : patients) {
+                patientListModel.addElement(p);
+            }
+        } else {
+            JOptionPane.showMessageDialog(this, "Could not load patients from server.");
+        }
+    }
+
+    private void onPatientSelected(ListSelectionEvent e) {
+        if (!e.getValueIsAdjusting()) {
+            Patient selectedPatient = patientList.getSelectedValue();
+            if (selectedPatient != null) {
+                loadDietPlan(selectedPatient.getId());
+            } else {
+                dietPlanListModel.clear();
+            }
+        }
+    }
+
+    private void loadDietPlan(int patientId) {
+        dietPlanListModel.clear();
+        List<DietPlan> dietPlan = client.getDietPlan(patientId);
+        if (dietPlan != null) {
+            for (DietPlan dp : dietPlan) {
+                dietPlanListModel.addElement(dp);
+            }
+        }
+    }
+
+    private void addPatient(ActionEvent e) {
+        String name = patientNameField.getText();
+        String condition = conditionField.getText();
+
+        if (name.isEmpty() || condition.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please fill in all patient fields.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        Patient patient = new Patient(name, condition);
+        String response = client.addPatient(patient);
+        JOptionPane.showMessageDialog(this, response);
+        
+        patientNameField.setText("");
+        conditionField.setText("");
+        loadPatients();
+    }
+
+    private void addDietItem(ActionEvent e) {
+        Patient selectedPatient = patientList.getSelectedValue();
+        if (selectedPatient == null) {
+            JOptionPane.showMessageDialog(this, "Please select a patient first.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        String mealType = (String) mealTypeCombo.getSelectedItem();
+        String foodItems = foodItemsField.getText();
+        String caloriesStr = caloriesField.getText();
+        
+        if (foodItems.isEmpty() || caloriesStr.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please fill in all diet item fields.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        int calories;
+        try {
+            calories = Integer.parseInt(caloriesStr);
+        } catch (NumberFormatException ex) {
+            JOptionPane.showMessageDialog(this, "Calories must be a number.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        
+        DietPlan dp = new DietPlan(selectedPatient.getId(), mealType, foodItems, calories);
+        String response = client.addDietItem(dp);
+        JOptionPane.showMessageDialog(this, response);
+        
+        foodItemsField.setText("");
+        caloriesField.setText("");
+        loadDietPlan(selectedPatient.getId()); // Refresh the diet list
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new DietPlannerUI().setVisible(true));
+    }
+}
